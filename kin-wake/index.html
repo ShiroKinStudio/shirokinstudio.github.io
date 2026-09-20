@@ -75,10 +75,10 @@
       const response = await fetch('https://ntfy.sh/' + encodeURIComponent(cfg.topic), {
         method: 'POST',
         body: 'WAKE:' + cfg.secret,
-        headers: {'Cache':'no','Firebase':'no'}
+        headers: {'Content-Type':'text/plain;charset=utf-8'}
       });
       if (!response.ok) throw new Error('HTTP ' + response.status);
-      status.innerHTML = '<span class="ok">WAKE SENT</span> · Telefon WoL paketini gönderiyor.';
+      status.innerHTML = '<span class="ok">WAKE QUEUED</span> · Komut telefon relay için kuyruğa bırakıldı.';
       setTimeout(() => { if (config().topic) wake.disabled = false; }, 1800);
     } catch (error) {
       status.innerHTML = '<span class="bad">WAKE FAILED</span> · ' + String(error.message || error);
