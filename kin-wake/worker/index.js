@@ -59,6 +59,19 @@ async function verifyToken(token, secret) {
     return false;
   }
 }
+async function verifyOwnerPin(input, env) {
+  if (typeof input !== 'string' || input.length > 256 || !env.KIN_WAKE_PIN_HASH || !env.KIN_WAKE_PIN_SALT) return false;
+  let salt;
+  try { salt = Uint8Array.from(atob(env.KIN_WAKE_PIN_SALT), c => c.charCodeAt(0)); }
+  catch { return false; }
+  if (salt.length !== 16 || env.KIN_WAKE_PIN_HASH.length > 128) return false;
+  const key = await crypto.subtle.importKey('raw', encoder.encode(input), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 200000 }, key, 256
+  );
+  const derived = btoa(String.fromCharCode(...new Uint8Array(bits)));
+  return secureCompare(derived, env.KIN_WAKE_PIN_HASH);
+}
 function validWebhook(value) {
   try {
     const url = new URL(value);
@@ -72,7 +85,7 @@ export default {
   async fetch(request, env) {
     const pathname = new URL(request.url).pathname;
     if (pathname === '/api/health' && request.method === 'GET') {
-      return response(request, { service: 'KIN Wake API', live: true });
+      return response(request, { service: 'KIN Wake API', live: true, configured: Boolean(env.KIN_WAKE_PIN_HASH && env.KIN_WAKE_PIN_SALT && env.KIN_WAKE_WEBHOOK && env.KIN_WAKE_SESSION_KEY) });
     }
     if (!pathname.startsWith(API_BASE)) return response(request, { error: 'Not found' }, 404);
     const origin = request.headers.get('Origin');
@@ -88,7 +101,7 @@ export default {
       }
     });
     if (request.method !== 'POST') return response(request, { error: 'Method not allowed' }, 405);
-    if (!env.KIN_WAKE_PIN || !env.KIN_WAKE_WEBHOOK || !env.KIN_WAKE_SESSION_KEY ||
+    if (!env.KIN_WAKE_PIN_HASH || !env.KIN_WAKE_PIN_SALT || !env.KIN_WAKE_WEBHOOK || !env.KIN_WAKE_SESSION_KEY ||
         !env.PIN_LIMITER || !env.WAKE_LIMITER || !validWebhook(env.KIN_WAKE_WEBHOOK)) {
       return response(request, { error: 'Service is not configured' }, 503);
     }
@@ -105,7 +118,7 @@ export default {
         const body = await request.json();
         pin = typeof body.pin === 'string' && body.pin.length <= 256 ? body.pin : null;
       } catch {}
-      if (pin === null || !secureCompare(pin, env.KIN_WAKE_PIN)) {
+      if (pin === null || !(await verifyOwnerPin(pin, env))) {
         return response(request, { error: 'Incorrect PIN' }, 401);
       }
       return response(request, { token: await issueToken(env.KIN_WAKE_SESSION_KEY), expiresIn: 1800 });
