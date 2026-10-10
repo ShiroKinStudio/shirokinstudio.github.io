@@ -34,207 +34,95 @@
 
     <div id="status" class="status">Wake relay hazırlanıyor…</div>
 
-    <div id="setupBox" class="lock">
-      <input id="newPin" type="password" inputmode="numeric" autocomplete="new-password" placeholder="Yeni owner PIN · en az 6 karakter">
-      <input id="newPin2" type="password" inputmode="numeric" autocomplete="new-password" placeholder="PIN tekrar">
-      <button id="setupPin" type="button">OWNER PIN OLUŞTUR</button>
-    </div>
-
     <div id="unlockBox" class="lock">
-      <input id="pin" type="password" inputmode="numeric" autocomplete="current-password" placeholder="Owner PIN">
+      <input id="pin" type="password" autocomplete="current-password" placeholder="Owner PIN">
       <button id="unlock" type="button">UNLOCK ENGINE CONTROL</button>
-    </div>
-
-    <div id="pairBox" class="lock">
-      <div class="hint">MacroDroid → Tetikleyici → Webhook (URL) alanındaki tam adresi buraya yapıştır. Adres yalnızca bu tarayıcıda saklanır.</div>
-      <input id="webhookUrl" type="password" autocomplete="off" spellcheck="false" placeholder="https://trigger.macrodroid.com/…">
-      <button id="saveWebhook" type="button">MACRODROID WEBHOOK KAYDET</button>
-      <button id="clearWebhook" type="button">WEBHOOK EŞLEŞMESİNİ KALDIR</button>
     </div>
 
     <button id="wake" type="button" disabled>START ENGINE</button>
     <a id="open" href="https://kin.shirokinstudio.com/">OPEN FULL KIN CONTROL</a>
-    <div class="muted">Webhook adresi ve PIN bu tarayıcıda saklanır; GitHub koduna yazılmaz. Webhook URL bir erişim anahtarıdır, kimseyle paylaşma. “Gönderildi” uyanmanın doğrulandığı anlamına gelmez.</div>
+    <div class="muted">PIN ve webhook GitHub Pages üzerinde saklanmaz. Cloudflare Worker Secret kullanılır. Giriş oturumu yaklaşık 30 dakika sürer.</div>
   </main>
 <script>
 (() => {
-  const WEBHOOK_KEY='kin.wake.macrodroid.webhook.v1';
-  const TOPIC_KEY='kin.wake.topic.v1';
-  const SECRET_KEY='kin.wake.secret.v1';
-  const PIN_SALT_KEY='kin.wake.pin.salt.v1';
-  const PIN_HASH_KEY='kin.wake.pin.hash.v1';
-  const status=document.getElementById('status');
-  const wake=document.getElementById('wake');
-  const setupBox=document.getElementById('setupBox');
-  const unlockBox=document.getElementById('unlockBox');
-  const newPin=document.getElementById('newPin');
-  const newPin2=document.getElementById('newPin2');
-  const setupPin=document.getElementById('setupPin');
-  const pin=document.getElementById('pin');
-  const unlock=document.getElementById('unlock');
-  const pairBox=document.getElementById('pairBox');
-  const webhookUrl=document.getElementById('webhookUrl');
-  const saveWebhook=document.getElementById('saveWebhook');
-  const clearWebhook=document.getElementById('clearWebhook');
-  let unlocked=false;
+  'use strict';
+  // Public API location is safe to expose. All real secrets live in Cloudflare Worker Secrets.
+  const API = 'https://wake-api.shirokinstudio.com';
+  const TOKEN_KEY = 'kin.wake.session.v2';
+  const status = document.getElementById('status');
+  const wake = document.getElementById('wake');
+  const unlockBox = document.getElementById('unlockBox');
+  const pin = document.getElementById('pin');
+  const unlock = document.getElementById('unlock');
+  let token = sessionStorage.getItem(TOKEN_KEY) || '';
 
-  const incoming=new URLSearchParams(location.hash.startsWith('#')?location.hash.slice(1):'');
-  const topicIn=incoming.get('topic');
-  const secretIn=incoming.get('secret');
-  if(topicIn&&secretIn){
-    localStorage.setItem(TOPIC_KEY,topicIn);
-    localStorage.setItem(SECRET_KEY,secretIn);
-    history.replaceState(null,'',location.pathname+location.search);
+  function show(message, color) {
+    status.textContent = message;
+    status.className = 'status ' + (color || '');
   }
-
-  function cfg(){
-    return {
-      webhook:localStorage.getItem(WEBHOOK_KEY)||'',
-      topic:localStorage.getItem(TOPIC_KEY)||'',
-      secret:localStorage.getItem(SECRET_KEY)||''
-    };
+  function render() {
+    unlockBox.classList.toggle('active', !token);
+    wake.disabled = !token;
+    show(token ? 'PIN doğrulandı. START ENGINE hazır.' : 'LOCKED · Owner PIN ile giriş yap.', token ? 'ok' : 'warn');
   }
-
-  function b64(bytes){return btoa(String.fromCharCode(...bytes));}
-  async function derivePin(pinText,saltBytes){
-    const enc=new TextEncoder();
-    const material=await crypto.subtle.importKey('raw',enc.encode(pinText),'PBKDF2',false,['deriveBits']);
-    const bits=await crypto.subtle.deriveBits(
-      {name:'PBKDF2',hash:'SHA-256',salt:saltBytes,iterations:150000},
-      material,256
-    );
-    return b64(new Uint8Array(bits));
-  }
-
-  function saltFromStorage(){
-    const s=localStorage.getItem(PIN_SALT_KEY)||'';
-    if(!s)return null;
-    return Uint8Array.from(atob(s),c=>c.charCodeAt(0));
-  }
-
-  function render(){
-    const c=cfg();
-    setupBox.classList.remove('active');
-    unlockBox.classList.remove('active');
-    pairBox.classList.remove('active');
-    wake.disabled=true;
-
-    const hasPin=Boolean(localStorage.getItem(PIN_HASH_KEY)&&localStorage.getItem(PIN_SALT_KEY));
-    if(!hasPin){
-      status.innerHTML='<span class="warn">OWNER LOCK SETUP</span> · Önce en az 6 karakterli bir PIN oluştur.';
-      setupBox.classList.add('active');
-      return;
+  async function api(path, payload, bearer) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (bearer) headers.Authorization = 'Bearer ' + bearer;
+    const response = await fetch(API + path, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload || {}),
+      cache: 'no-store',
+      referrerPolicy: 'no-referrer'
+    });
+    let data = {};
+    try { data = await response.json(); } catch {}
+    if (!response.ok) {
+      const err = new Error(data.error || 'HTTP ' + response.status);
+      err.status = response.status;
+      throw err;
     }
-    if(!unlocked){
-      status.innerHTML='<span class="warn">LOCKED</span> · Engine Control kilitli.';
-      unlockBox.classList.add('active');
-      return;
-    }
-
-    pairBox.classList.add('active');
-    if(c.webhook){
-      status.innerHTML='<span class="ok">MACRODROID CONFIGURED</span> · Webhook bu tarayıcıya kaydedilmiş. Telefon bağlantısı henüz doğrulanmadı.';
-      wake.disabled=false;
-    }else if(c.topic&&c.secret){
-      status.innerHTML='<span class="warn">LEGACY NTFY</span> · Eski ntfy relay ayarı kullanılıyor. MacroDroid için webhook kaydet.';
-      wake.disabled=false;
-    }else{
-      status.innerHTML='<span class="warn">NOT PAIRED</span> · MacroDroid webhook adresini aşağıya yapıştır ve kaydet.';
-    }
+    return data;
   }
-
-  function isValidWebhook(value){
-    try{
-      const u=new URL(value);
-      return u.protocol==='https:'&&u.hostname==='trigger.macrodroid.com'
-        &&!u.username&&!u.password&&u.pathname.split('/').filter(Boolean).length>=2;
-    }catch{return false;}
-  }
-
-  saveWebhook.addEventListener('click',()=>{
-    if(!unlocked)return render();
-    const value=webhookUrl.value.trim();
-    if(!isValidWebhook(value)){
-      status.innerHTML='<span class="bad">INVALID WEBHOOK</span> · Tam trigger.macrodroid.com URL adresini gir.';
-      return;
-    }
-    localStorage.setItem(WEBHOOK_KEY,value);
-    webhookUrl.value='';
-    render();
-  });
-
-  clearWebhook.addEventListener('click',()=>{
-    if(!unlocked)return render();
-    localStorage.removeItem(WEBHOOK_KEY);
-    webhookUrl.value='';
-    render();
-  });
-
-  setupPin.addEventListener('click',async()=>{
-    const a=newPin.value;
-    const b=newPin2.value;
-    if(a.length<6){status.innerHTML='<span class="bad">PIN TOO SHORT</span> · En az 6 karakter kullan.';return;}
-    if(a!==b){status.innerHTML='<span class="bad">PIN MISMATCH</span> · PIN tekrarını kontrol et.';return;}
-    setupPin.disabled=true;
-    try{
-      const salt=crypto.getRandomValues(new Uint8Array(16));
-      const hash=await derivePin(a,salt);
-      localStorage.setItem(PIN_SALT_KEY,b64(salt));
-      localStorage.setItem(PIN_HASH_KEY,hash);
-      newPin.value='';newPin2.value='';
-      unlocked=true;
+  unlock.addEventListener('click', async () => {
+    const entered = pin.value;
+    pin.value = '';
+    if (!entered) return show('PIN girmen gerekiyor.', 'bad');
+    unlock.disabled = true;
+    show('PIN doğrulanıyor…');
+    try {
+      const data = await api('/api/session', { pin: entered });
+      if (!data.token) throw new Error('Sunucu token döndürmedi.');
+      token = data.token;
+      sessionStorage.setItem(TOKEN_KEY, token);
       render();
-    }finally{setupPin.disabled=false;}
-  });
-
-  unlock.addEventListener('click',async()=>{
-    const salt=saltFromStorage();
-    const expected=localStorage.getItem(PIN_HASH_KEY)||'';
-    if(!salt||!expected)return render();
-    unlock.disabled=true;
-    try{
-      const actual=await derivePin(pin.value,salt);
-      if(actual!==expected){
-        status.innerHTML='<span class="bad">ACCESS DENIED</span> · PIN yanlış.';
-        pin.value='';
-        return;
-      }
-      pin.value='';
-      unlocked=true;
-      render();
-    }finally{unlock.disabled=false;}
-  });
-
-  pin.addEventListener('keydown',e=>{if(e.key==='Enter')unlock.click();});
-
-  wake.addEventListener('click',async()=>{
-    if(!unlocked)return render();
-    const c=cfg();
-    wake.disabled=true;
-    status.textContent='WAKE isteği gönderiliyor…';
-    try{
-      if(c.webhook){
-        if(!isValidWebhook(c.webhook))throw new Error('Webhook URL geçersiz; yeniden eşleştir.');
-        // Opaque response: CORS kontrolü sonucu okunamaz. Asla cihaz uyandı diye iddia etme.
-        await fetch(c.webhook,{method:'GET',mode:'no-cors',cache:'no-store',referrerPolicy:'no-referrer'});
-        status.innerHTML='<span class="warn">WEBHOOK REQUEST SENT</span> · Gönderim denendi. Telefonun paketi gönderdiği ve PC’nin uyandığı henüz doğrulanmadı.';
-      }else if(c.topic&&c.secret){
-        const response=await fetch('https://ntfy.sh/'+encodeURIComponent(c.topic),{
-          method:'POST',body:'WAKE:'+c.secret,
-          headers:{'Content-Type':'text/plain;charset=utf-8'}
-        });
-        if(!response.ok)throw new Error('HTTP '+response.status);
-        status.innerHTML='<span class="warn">NTFY QUEUED</span> · Eski relay için kuyruğa bırakıldı; PC açılışı doğrulanmadı.';
-      }else{
-        return render();
-      }
-    }catch(error){
-      status.innerHTML='<span class="bad">WAKE FAILED</span> · '+String(error.message||error);
-    }finally{
-      setTimeout(()=>{if(unlocked)wake.disabled=false;},1800);
+    } catch (err) {
+      show('Giriş başarısız: ' + err.message, 'bad');
+    } finally {
+      unlock.disabled = false;
     }
   });
-
+  pin.addEventListener('keydown', event => { if (event.key === 'Enter') unlock.click(); });
+  wake.addEventListener('click', async () => {
+    if (!token) return render();
+    wake.disabled = true;
+    show('Wake komutu gönderiliyor…');
+    try {
+      const data = await api('/api/wake', {}, token);
+      show(data.queued
+        ? 'WEBHOOK ACCEPTED · Telefonun WOL paketi gönderdiği ve PC’nin açıldığı henüz doğrulanmadı.'
+        : 'İstek yanıtlandı; PC durumu bilinmiyor.', 'warn');
+    } catch (err) {
+      if (err.status === 401) {
+        token = '';
+        sessionStorage.removeItem(TOKEN_KEY);
+        render();
+      }
+      show('WAKE FAILED · ' + err.message, 'bad');
+    } finally {
+      wake.disabled = !token;
+    }
+  });
   render();
 })();
 </script>
