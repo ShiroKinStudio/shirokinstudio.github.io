@@ -1,0 +1,18 @@
+name = "kin-wake-api"
+main = "index.js"
+compatibility_date = "2026-10-11"
+workers_dev = true
+
+[[routes]]
+pattern = "wake-api.shirokinstudio.com"
+custom_domain = true
+
+[[ratelimits]]
+name = "PIN_LIMITER"
+namespace_id = "87312911"
+simple = { limit = 5, period = 60 }
+
+[[ratelimits]]
+name = "WAKE_LIMITER"
+namespace_id = "87312912"
+simple = { limit = 3, period = 60 }
