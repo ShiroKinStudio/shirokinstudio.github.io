@@ -1,241 +1,203 @@
 <!doctype html>
 <html lang="tr">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#0a0b0d">
-  <title>KIN · Engine Wake</title>
-  <style>
-    :root{color-scheme:dark;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-    *{box-sizing:border-box}
-    body{margin:0;min-height:100vh;background:#08090b;color:#f3f4f6;display:grid;place-items:center;padding:24px}
-    .card{width:min(520px,100%);border:1px solid #262930;border-radius:22px;background:#111318;padding:28px;box-shadow:0 24px 80px rgba(0,0,0,.45)}
-    .eyebrow{font-size:12px;letter-spacing:.18em;color:#8b93a1;font-weight:700}
-    h1{font-size:30px;margin:10px 0 8px}
-    p{color:#a8afbb;line-height:1.5;margin:0 0 22px}
-    .status{margin:0 0 18px;padding:12px 14px;border:1px solid #262930;border-radius:14px;background:#0c0e12;color:#c6ccd5;font:13px ui-monospace,SFMono-Regular,Consolas,monospace}
-    button,a,input{width:100%;border-radius:14px;padding:15px 16px;font-weight:800;font-size:15px}
-    button,a{text-decoration:none;text-align:center;display:block}
-    input{border:1px solid #2a2e36;background:#0c0e12;color:#f3f4f6;margin-bottom:10px}
-    #wake,#unlock,#setupPin,#saveWebhook{border:0;background:#f3f4f6;color:#08090b;cursor:pointer}
-    #wake:disabled,#unlock:disabled,#setupPin:disabled,#saveWebhook:disabled{opacity:.55;cursor:wait}
-    #open{margin-top:10px;border:1px solid #2a2e36;color:#d6dae1;background:#171a20}
-    .ok{color:#8de1a8}.bad{color:#ff9d9d}.warn{color:#ffd28d}.muted{font-size:12px;color:#747c88;margin-top:18px}
-    .lock{display:none;margin-top:4px}.lock.active{display:block}
-    #clearWebhook{margin:8px 0 16px;background:#171a20;color:#d6dae1;border:1px solid #2a2e36;cursor:pointer}
-    .hint{font-size:12px;color:#9199a6;margin:8px 0 16px;line-height:1.5}
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0a0b0d">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src 'self' https://trigger.macrodroid.com; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>KIN · Engine Wake</title>
+<style>
+:root{color-scheme:dark;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#08090b;color:#f3f4f6;display:grid;place-items:center;padding:24px}
+.card{width:min(520px,100%);border:1px solid #262930;border-radius:22px;background:#111318;padding:28px;box-shadow:0 24px 80px rgba(0,0,0,.45)}
+.eyebrow{font-size:12px;letter-spacing:.18em;color:#8b93a1;font-weight:700}
+h1{font-size:30px;margin:10px 0 8px}
+p{color:#a8afbb;line-height:1.5;margin:0 0 22px}
+.status{margin:0 0 18px;padding:12px 14px;border:1px solid #262930;border-radius:14px;background:#0c0e12;color:#c6ccd5;font:13px Consolas,monospace}
+button,a,input{width:100%;border-radius:14px;padding:15px 16px;font-weight:800;font-size:15px}
+button,a{text-decoration:none;text-align:center;display:block}
+input{border:1px solid #2a2e36;background:#0c0e12;color:#f3f4f6;margin-bottom:10px}
+button{border:0;background:#f3f4f6;color:#08090b;cursor:pointer}
+button:disabled{opacity:.5;cursor:wait}
+#open{margin-top:10px;border:1px solid #2a2e36;color:#d6dae1;background:#171a20}
+.muted{font-size:12px;color:#919aa8;margin-top:18px;line-height:1.5}
+#wake,#lockAgain{display:none}
+#wake.visible,#lockAgain.visible{display:block}
+#lockAgain{margin-top:10px;background:#171a20;border:1px solid #2a2e36;color:#d6dae1}
+</style>
 </head>
 <body>
-  <main class="card">
-    <div class="eyebrow">KIN · ENGINE CONTROL</div>
-    <h1>START ENGINE</h1>
-    <p>Android MacroDroid aracılığıyla evdeki PC'ye Wake-on-LAN komutu gönder. PC veya Supervisor'ın önceden açık olması gerekmez.</p>
-
-    <div id="status" class="status">Wake relay hazırlanıyor…</div>
-
-    <div id="setupBox" class="lock">
-      <input id="newPin" type="password" inputmode="numeric" autocomplete="new-password" placeholder="Yeni owner PIN · en az 6 karakter">
-      <input id="newPin2" type="password" inputmode="numeric" autocomplete="new-password" placeholder="PIN tekrar">
-      <button id="setupPin" type="button">OWNER PIN OLUŞTUR</button>
-    </div>
-
-    <div id="unlockBox" class="lock">
-      <input id="pin" type="password" inputmode="numeric" autocomplete="current-password" placeholder="Owner PIN">
-      <button id="unlock" type="button">UNLOCK ENGINE CONTROL</button>
-    </div>
-
-    <div id="pairBox" class="lock">
-      <div class="hint">MacroDroid → Tetikleyici → Webhook (URL) alanındaki tam adresi buraya yapıştır. Adres yalnızca bu tarayıcıda saklanır.</div>
-      <input id="webhookUrl" type="password" autocomplete="off" spellcheck="false" placeholder="https://trigger.macrodroid.com/…">
-      <button id="saveWebhook" type="button">MACRODROID WEBHOOK KAYDET</button>
-      <button id="clearWebhook" type="button">WEBHOOK EŞLEŞMESİNİ KALDIR</button>
-    </div>
-
-    <button id="wake" type="button" disabled>START ENGINE</button>
-    <a id="open" href="https://kin.shirokinstudio.com/">OPEN FULL KIN CONTROL</a>
-    <div class="muted">Webhook adresi ve PIN bu tarayıcıda saklanır; GitHub koduna yazılmaz. Webhook URL bir erişim anahtarıdır, kimseyle paylaşma. “Gönderildi” uyanmanın doğrulandığı anlamına gelmez.</div>
-  </main>
+<main class="card">
+  <div class="eyebrow">KIN · ENGINE CONTROL</div>
+  <h1>START ENGINE</h1>
+  <p>Bir kez Windows 10 KIN Wake Manager ile eşleştir. Diğer cihazlardan yalnızca şifrenle giriş yap.</p>
+  <div id="status" class="status" role="status" aria-live="polite">Şifreli ayar kontrol ediliyor…</div>
+  <div id="lock">
+    <input id="password" type="password" autocomplete="current-password" placeholder="KIN Wake şifresi" aria-label="KIN Wake şifresi">
+    <button id="unlock" type="button">UNLOCK ENGINE CONTROL</button>
+  </div>
+  <button id="wake" type="button">START ENGINE</button>
+  <button id="lockAgain" type="button">KİLİTLE</button>
+  <a id="open" href="https://kin.shirokinstudio.com/">OPEN FULL KIN CONTROL</a>
+  <div class="muted">Webhook adresi GitHub üzerinde AES-256-GCM ile şifrelidir. 3 yanlış denemede bu tarayıcı 1 dakika bekler. Bu yerel gecikme sunucu güvenliği değildir; kısa şifreler çevrimdışı kırılabilir. Komut gönderimi PC'nin açıldığını kanıtlamaz.</div>
+</main>
 <script>
 (() => {
-  const WEBHOOK_KEY='kin.wake.macrodroid.webhook.v1';
-  const TOPIC_KEY='kin.wake.topic.v1';
-  const SECRET_KEY='kin.wake.secret.v1';
-  const PIN_SALT_KEY='kin.wake.pin.salt.v1';
-  const PIN_HASH_KEY='kin.wake.pin.hash.v1';
-  const status=document.getElementById('status');
-  const wake=document.getElementById('wake');
-  const setupBox=document.getElementById('setupBox');
-  const unlockBox=document.getElementById('unlockBox');
-  const newPin=document.getElementById('newPin');
-  const newPin2=document.getElementById('newPin2');
-  const setupPin=document.getElementById('setupPin');
-  const pin=document.getElementById('pin');
-  const unlock=document.getElementById('unlock');
-  const pairBox=document.getElementById('pairBox');
-  const webhookUrl=document.getElementById('webhookUrl');
-  const saveWebhook=document.getElementById('saveWebhook');
-  const clearWebhook=document.getElementById('clearWebhook');
-  let unlocked=false;
-
-  const incoming=new URLSearchParams(location.hash.startsWith('#')?location.hash.slice(1):'');
-  const topicIn=incoming.get('topic');
-  const secretIn=incoming.get('secret');
-  if(topicIn&&secretIn){
-    localStorage.setItem(TOPIC_KEY,topicIn);
-    localStorage.setItem(SECRET_KEY,secretIn);
-    history.replaceState(null,'',location.pathname+location.search);
+  'use strict';
+  const encoder = new TextEncoder();
+  const status = document.getElementById('status');
+  const password = document.getElementById('password');
+  const lock = document.getElementById('lock');
+  const unlock = document.getElementById('unlock');
+  const wake = document.getElementById('wake');
+  const lockAgain = document.getElementById('lockAgain');
+  const LOCK_KEY = 'kin.wake.failed.local.v1';
+  let activeWebhook = null;
+  let busy = false;
+  let inMemory = { failures:0, until:0 };
+  function report(message) { status.textContent = message; }
+  function attempts() {
+    try {
+      const obj = JSON.parse(localStorage.getItem(LOCK_KEY) || '{}');
+      if (typeof obj.failures === 'number' && typeof obj.until === 'number') {
+        inMemory = { failures:Math.max(0,Math.min(3,obj.failures)), until:Math.max(0,obj.until) };
+      }
+    } catch {}
+    return inMemory;
   }
-
-  function cfg(){
-    return {
-      webhook:localStorage.getItem(WEBHOOK_KEY)||'',
-      topic:localStorage.getItem(TOPIC_KEY)||'',
-      secret:localStorage.getItem(SECRET_KEY)||''
-    };
+  function saveAttempts(obj) {
+    inMemory = obj;
+    try { localStorage.setItem(LOCK_KEY, JSON.stringify(obj)); } catch {}
   }
-
-  function b64(bytes){return btoa(String.fromCharCode(...bytes));}
-  async function derivePin(pinText,saltBytes){
-    const enc=new TextEncoder();
-    const material=await crypto.subtle.importKey('raw',enc.encode(pinText),'PBKDF2',false,['deriveBits']);
-    const bits=await crypto.subtle.deriveBits(
-      {name:'PBKDF2',hash:'SHA-256',salt:saltBytes,iterations:150000},
-      material,256
+  function remaining() {
+    const a = attempts();
+    return Math.max(0, Math.ceil((a.until - Date.now()) / 1000));
+  }
+  function updateLockout() {
+    const seconds = remaining();
+    if (seconds) {
+      unlock.disabled = true;
+      report('TOO MANY ATTEMPTS · ' + seconds + ' saniye sonra yeniden dene.');
+    } else if (!busy && !activeWebhook) {
+      unlock.disabled = false;
+      const a = attempts();
+      if (a.until && Date.now() >= a.until) saveAttempts({ failures:0, until:0 });
+    }
+  }
+  function addFailure() {
+    const current = attempts();
+    const failures = current.failures + 1;
+    if (failures >= 3) {
+      saveAttempts({ failures:0, until:Date.now()+60000 });
+      updateLockout();
+    } else {
+      saveAttempts({ failures, until:0 });
+      report('Şifre yanlış · ' + (3-failures) + ' deneme hakkı kaldı.');
+    }
+  }
+  function decode64(s) { return Uint8Array.from(atob(s), c => c.charCodeAt(0)); }
+  function validWebhook(raw) {
+    try {
+      const u = new URL(raw);
+      return u.protocol === 'https:' && u.hostname === 'trigger.macrodroid.com' &&
+        !u.username && !u.password && !u.hash && (u.port === '' || u.port === '443') &&
+        u.pathname.split('/').filter(Boolean).length >= 2;
+    } catch { return false; }
+  }
+  async function decryptPairing(data, pass) {
+    if (!data || data.version !== 2 || data.cipher !== 'AES-256-GCM' ||
+        data.kdf !== 'PBKDF2-SHA256' || data.iterations !== 600000) {
+      throw new Error('Şifreli eşleştirme biçimi geçersiz.');
+    }
+    const salt = decode64(data.salt), iv = decode64(data.iv), ciphertext = decode64(data.ciphertext);
+    if (salt.length !== 16 || iv.length !== 12 || ciphertext.length < 25 || ciphertext.length > 4096) {
+      throw new Error('Şifreli kayıt bozuk.');
+    }
+    const keySource = await crypto.subtle.importKey('raw', encoder.encode(pass), 'PBKDF2', false, ['deriveKey']);
+    const key = await crypto.subtle.deriveKey(
+      { name:'PBKDF2', salt, iterations:600000, hash:'SHA-256' },
+      keySource, { name:'AES-GCM', length:256 }, false, ['decrypt']
     );
-    return b64(new Uint8Array(bits));
+    let plaintext;
+    try {
+      plaintext = await crypto.subtle.decrypt(
+        { name:'AES-GCM', iv, additionalData:encoder.encode('KIN-WAKE-PAIRING-V2'), tagLength:128 },
+        key, ciphertext
+      );
+    } catch {
+      const e = new Error('Şifre yanlış');
+      e.badPassword = true;
+      throw e;
+    }
+    const payload = JSON.parse(new TextDecoder('utf-8', {fatal:true}).decode(plaintext));
+    if (payload.format !== 'kin-wake-v2' || !validWebhook(payload.webhook)) {
+      throw new Error('Eşleştirme içeriği geçersiz.');
+    }
+    return payload.webhook;
   }
-
-  function saltFromStorage(){
-    const s=localStorage.getItem(PIN_SALT_KEY)||'';
-    if(!s)return null;
-    return Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+  async function readPairing() {
+    const r = await fetch('./pairing.json?v=' + Date.now(), {
+      cache:'no-store', credentials:'omit', referrerPolicy:'no-referrer'
+    });
+    if (!r.ok) throw new Error('Eşleştirme bulunamadı; Windows KIN Wake Manager ile bir kez kaydet.');
+    const text = await r.text();
+    if (text.length > 4096) throw new Error('Şifreli eşleştirme dosyası beklenenden büyük.');
+    return JSON.parse(text);
   }
-
-  function render(){
-    const c=cfg();
-    setupBox.classList.remove('active');
-    unlockBox.classList.remove('active');
-    pairBox.classList.remove('active');
-    wake.disabled=true;
-
-    const hasPin=Boolean(localStorage.getItem(PIN_HASH_KEY)&&localStorage.getItem(PIN_SALT_KEY));
-    if(!hasPin){
-      status.innerHTML='<span class="warn">OWNER LOCK SETUP</span> · Önce en az 6 karakterli bir PIN oluştur.';
-      setupBox.classList.add('active');
-      return;
-    }
-    if(!unlocked){
-      status.innerHTML='<span class="warn">LOCKED</span> · Engine Control kilitli.';
-      unlockBox.classList.add('active');
-      return;
-    }
-
-    pairBox.classList.add('active');
-    if(c.webhook){
-      status.innerHTML='<span class="ok">MACRODROID CONFIGURED</span> · Webhook bu tarayıcıya kaydedilmiş. Telefon bağlantısı henüz doğrulanmadı.';
-      wake.disabled=false;
-    }else if(c.topic&&c.secret){
-      status.innerHTML='<span class="warn">LEGACY NTFY</span> · Eski ntfy relay ayarı kullanılıyor. MacroDroid için webhook kaydet.';
-      wake.disabled=false;
-    }else{
-      status.innerHTML='<span class="warn">NOT PAIRED</span> · MacroDroid webhook adresini aşağıya yapıştır ve kaydet.';
+  async function doUnlock() {
+    if (busy || activeWebhook || remaining()) return updateLockout();
+    const pass = password.value;
+    password.value = '';
+    if (!pass) return report('KIN Wake şifresini yaz.');
+    busy = true;
+    unlock.disabled = true;
+    report('Şifre doğrulanıyor…');
+    try {
+      const blob = await readPairing();
+      activeWebhook = await decryptPairing(blob, pass);
+      saveAttempts({ failures:0, until:0 });
+      lock.style.display = 'none';
+      wake.classList.add('visible');
+      lockAgain.classList.add('visible');
+      report('UNLOCKED · START ENGINE hazır.');
+    } catch (e) {
+      activeWebhook = null;
+      if (e.badPassword) addFailure();
+      else report('WAKE FAILED · ' + (e.message || 'Eşleştirme okunamadı.'));
+    } finally {
+      busy = false;
+      updateLockout();
     }
   }
-
-  function isValidWebhook(value){
-    try{
-      const u=new URL(value);
-      return u.protocol==='https:'&&u.hostname==='trigger.macrodroid.com'
-        &&!u.username&&!u.password&&u.pathname.split('/').filter(Boolean).length>=2;
-    }catch{return false;}
+  function doLock() {
+    activeWebhook = null;
+    wake.classList.remove('visible');
+    lockAgain.classList.remove('visible');
+    lock.style.display = '';
+    report('LOCKED · Şifrenle giriş yap.');
+    updateLockout();
   }
-
-  saveWebhook.addEventListener('click',()=>{
-    if(!unlocked)return render();
-    const value=webhookUrl.value.trim();
-    if(!isValidWebhook(value)){
-      status.innerHTML='<span class="bad">INVALID WEBHOOK</span> · Tam trigger.macrodroid.com URL adresini gir.';
-      return;
-    }
-    localStorage.setItem(WEBHOOK_KEY,value);
-    webhookUrl.value='';
-    render();
-  });
-
-  clearWebhook.addEventListener('click',()=>{
-    if(!unlocked)return render();
-    localStorage.removeItem(WEBHOOK_KEY);
-    webhookUrl.value='';
-    render();
-  });
-
-  setupPin.addEventListener('click',async()=>{
-    const a=newPin.value;
-    const b=newPin2.value;
-    if(a.length<6){status.innerHTML='<span class="bad">PIN TOO SHORT</span> · En az 6 karakter kullan.';return;}
-    if(a!==b){status.innerHTML='<span class="bad">PIN MISMATCH</span> · PIN tekrarını kontrol et.';return;}
-    setupPin.disabled=true;
-    try{
-      const salt=crypto.getRandomValues(new Uint8Array(16));
-      const hash=await derivePin(a,salt);
-      localStorage.setItem(PIN_SALT_KEY,b64(salt));
-      localStorage.setItem(PIN_HASH_KEY,hash);
-      newPin.value='';newPin2.value='';
-      unlocked=true;
-      render();
-    }finally{setupPin.disabled=false;}
-  });
-
-  unlock.addEventListener('click',async()=>{
-    const salt=saltFromStorage();
-    const expected=localStorage.getItem(PIN_HASH_KEY)||'';
-    if(!salt||!expected)return render();
-    unlock.disabled=true;
-    try{
-      const actual=await derivePin(pin.value,salt);
-      if(actual!==expected){
-        status.innerHTML='<span class="bad">ACCESS DENIED</span> · PIN yanlış.';
-        pin.value='';
-        return;
-      }
-      pin.value='';
-      unlocked=true;
-      render();
-    }finally{unlock.disabled=false;}
-  });
-
-  pin.addEventListener('keydown',e=>{if(e.key==='Enter')unlock.click();});
-
-  wake.addEventListener('click',async()=>{
-    if(!unlocked)return render();
-    const c=cfg();
-    wake.disabled=true;
-    status.textContent='WAKE isteği gönderiliyor…';
-    try{
-      if(c.webhook){
-        if(!isValidWebhook(c.webhook))throw new Error('Webhook URL geçersiz; yeniden eşleştir.');
-        // Opaque response: CORS kontrolü sonucu okunamaz. Asla cihaz uyandı diye iddia etme.
-        await fetch(c.webhook,{method:'GET',mode:'no-cors',cache:'no-store',referrerPolicy:'no-referrer'});
-        status.innerHTML='<span class="warn">WEBHOOK REQUEST SENT</span> · Gönderim denendi. Telefonun paketi gönderdiği ve PC’nin uyandığı henüz doğrulanmadı.';
-      }else if(c.topic&&c.secret){
-        const response=await fetch('https://ntfy.sh/'+encodeURIComponent(c.topic),{
-          method:'POST',body:'WAKE:'+c.secret,
-          headers:{'Content-Type':'text/plain;charset=utf-8'}
-        });
-        if(!response.ok)throw new Error('HTTP '+response.status);
-        status.innerHTML='<span class="warn">NTFY QUEUED</span> · Eski relay için kuyruğa bırakıldı; PC açılışı doğrulanmadı.';
-      }else{
-        return render();
-      }
-    }catch(error){
-      status.innerHTML='<span class="bad">WAKE FAILED</span> · '+String(error.message||error);
-    }finally{
-      setTimeout(()=>{if(unlocked)wake.disabled=false;},1800);
-    }
-  });
-
-  render();
+  async function doWake() {
+    if (!activeWebhook || !validWebhook(activeWebhook)) return doLock();
+    wake.disabled = true;
+    report('MacroDroid tetikleyicisine istek gönderiliyor…');
+    try {
+      await fetch(activeWebhook, {
+        method:'GET', mode:'no-cors', cache:'no-store', credentials:'omit', referrerPolicy:'no-referrer'
+      });
+      report('WEBHOOK REQUEST SENT · İstek denendi; PC’nin açıldığı doğrulanmadı.');
+    } catch {
+      report('WAKE FAILED · MacroDroid ağını veya tetikleyici kaydını kontrol et.');
+    } finally { wake.disabled = false; }
+  }
+  unlock.addEventListener('click', doUnlock);
+  password.addEventListener('keydown', e => { if (e.key === 'Enter') doUnlock(); });
+  wake.addEventListener('click', doWake);
+  lockAgain.addEventListener('click', doLock);
+  setInterval(updateLockout, 1000);
+  updateLockout();
 })();
 </script>
 </body>
