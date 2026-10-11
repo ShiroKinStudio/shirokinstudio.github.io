@@ -22,26 +22,26 @@ input{border:1px solid #2a2e36;background:#0c0e12;color:#f3f4f6;margin-bottom:10
 button{border:0;background:#f3f4f6;color:#08090b;cursor:pointer}
 button:disabled{opacity:.5;cursor:wait}
 #open{margin-top:10px;border:1px solid #2a2e36;color:#d6dae1;background:#171a20}
-.muted{font-size:12px;color:#919aa8;margin-top:18px;line-height:1.5}
 #wake,#lockAgain{display:none}
 #wake.visible,#lockAgain.visible{display:block}
 #lockAgain{margin-top:10px;background:#171a20;border:1px solid #2a2e36;color:#d6dae1}
+.muted{font-size:12px;color:#8b93a1;margin-top:16px;line-height:1.5}
 </style>
 </head>
 <body>
 <main class="card">
   <div class="eyebrow">KIN · ENGINE CONTROL</div>
   <h1>START ENGINE</h1>
-  <p>Bir kez Windows 10 KIN Wake Manager ile eşleştir. Diğer cihazlardan yalnızca şifrenle giriş yap.</p>
-  <div id="status" class="status" role="status" aria-live="polite">Şifreli ayar kontrol ediliyor…</div>
+  <p>KIN Wake giriş şifreni yaz. MacroDroid <b>kinwake</b> tetikleyicisi arka planda eşleştirilmiştir.</p>
+  <div id="status" class="status" role="status" aria-live="polite">LOCKED · Şifreni gir.</div>
   <div id="lock">
-    <input id="password" type="password" autocomplete="current-password" placeholder="KIN Wake şifresi" aria-label="KIN Wake şifresi">
+    <input id="password" type="password" autocomplete="current-password" placeholder="KIN Wake giriş şifresi">
     <button id="unlock" type="button">UNLOCK ENGINE CONTROL</button>
   </div>
   <button id="wake" type="button">START ENGINE</button>
   <button id="lockAgain" type="button">KİLİTLE</button>
   <a id="open" href="https://kin.shirokinstudio.com/">OPEN FULL KIN CONTROL</a>
-  <div class="muted">Webhook adresi GitHub üzerinde AES-256-GCM ile şifrelidir. 3 yanlış denemede bu tarayıcı 1 dakika bekler. Bu yerel gecikme sunucu güvenliği değildir; kısa şifreler çevrimdışı kırılabilir. Komut gönderimi PC'nin açıldığını kanıtlamaz.</div>
+  <div class="muted">3 yanlış denemede bu tarayıcı 1 dakika bekler. Komutun gönderilmesi PC'nin açıldığını tek başına doğrulamaz.</div>
 </main>
 <script>
 (() => {
@@ -53,151 +53,96 @@ button:disabled{opacity:.5;cursor:wait}
   const unlock = document.getElementById('unlock');
   const wake = document.getElementById('wake');
   const lockAgain = document.getElementById('lockAgain');
-  const LOCK_KEY = 'kin.wake.failed.local.v1';
-  let activeWebhook = null;
+  const LOCK_KEY = 'kin.wake.failed.local.v2';
+  let activeWebhook = '';
   let busy = false;
-  let inMemory = { failures:0, until:0 };
-  function report(message) { status.textContent = message; }
-  function attempts() {
-    try {
-      const obj = JSON.parse(localStorage.getItem(LOCK_KEY) || '{}');
-      if (typeof obj.failures === 'number' && typeof obj.until === 'number') {
-        inMemory = { failures:Math.max(0,Math.min(3,obj.failures)), until:Math.max(0,obj.until) };
-      }
-    } catch {}
-    return inMemory;
+
+  function report(text){status.textContent=text}
+  function getState(){
+    try{
+      const v=JSON.parse(localStorage.getItem(LOCK_KEY)||'{}');
+      return {fails:Number(v.fails)||0,until:Number(v.until)||0};
+    }catch{return {fails:0,until:0}}
   }
-  function saveAttempts(obj) {
-    inMemory = obj;
-    try { localStorage.setItem(LOCK_KEY, JSON.stringify(obj)); } catch {}
+  function setState(v){try{localStorage.setItem(LOCK_KEY,JSON.stringify(v))}catch{}}
+  function remaining(){return Math.max(0,Math.ceil((getState().until-Date.now())/1000))}
+  function refreshLock(){
+    const sec=remaining();
+    if(sec){unlock.disabled=true;report('TOO MANY ATTEMPTS · '+sec+' saniye bekle.');return}
+    if(!busy&&!activeWebhook) unlock.disabled=false;
+    const s=getState();
+    if(s.until&&Date.now()>=s.until)setState({fails:0,until:0});
   }
-  function remaining() {
-    const a = attempts();
-    return Math.max(0, Math.ceil((a.until - Date.now()) / 1000));
+  function fail(){
+    const s=getState();
+    const n=s.fails+1;
+    if(n>=3){setState({fails:0,until:Date.now()+60000});refreshLock()}
+    else{setState({fails:n,until:0});report('Şifre yanlış · '+(3-n)+' deneme hakkı kaldı.')}
   }
-  function updateLockout() {
-    const seconds = remaining();
-    if (seconds) {
-      unlock.disabled = true;
-      report('TOO MANY ATTEMPTS · ' + seconds + ' saniye sonra yeniden dene.');
-    } else if (!busy && !activeWebhook) {
-      unlock.disabled = false;
-      const a = attempts();
-      if (a.until && Date.now() >= a.until) saveAttempts({ failures:0, until:0 });
-    }
+  function b64(s){return Uint8Array.from(atob(s),c=>c.charCodeAt(0))}
+  function validWebhook(raw){
+    try{
+      const u=new URL(raw);
+      return u.protocol==='https:'&&u.hostname==='trigger.macrodroid.com'&&!u.username&&!u.password&&!u.hash&&(u.port===''||u.port==='443')&&u.pathname.split('/').filter(Boolean).length>=2;
+    }catch{return false}
   }
-  function addFailure() {
-    const current = attempts();
-    const failures = current.failures + 1;
-    if (failures >= 3) {
-      saveAttempts({ failures:0, until:Date.now()+60000 });
-      updateLockout();
-    } else {
-      saveAttempts({ failures, until:0 });
-      report('Şifre yanlış · ' + (3-failures) + ' deneme hakkı kaldı.');
-    }
-  }
-  function decode64(s) { return Uint8Array.from(atob(s), c => c.charCodeAt(0)); }
-  function validWebhook(raw) {
-    try {
-      const u = new URL(raw);
-      return u.protocol === 'https:' && u.hostname === 'trigger.macrodroid.com' &&
-        !u.username && !u.password && !u.hash && (u.port === '' || u.port === '443') &&
-        u.pathname.split('/').filter(Boolean).length >= 2;
-    } catch { return false; }
-  }
-  async function decryptPairing(data, pass) {
-    if (!data || data.version !== 2 || data.cipher !== 'AES-256-GCM' ||
-        data.kdf !== 'PBKDF2-SHA256' || data.iterations !== 600000) {
-      throw new Error('Şifreli eşleştirme biçimi geçersiz.');
-    }
-    const salt = decode64(data.salt), iv = decode64(data.iv), ciphertext = decode64(data.ciphertext);
-    if (salt.length !== 16 || iv.length !== 12 || ciphertext.length < 25 || ciphertext.length > 4096) {
-      throw new Error('Şifreli kayıt bozuk.');
-    }
-    const keySource = await crypto.subtle.importKey('raw', encoder.encode(pass), 'PBKDF2', false, ['deriveKey']);
-    const key = await crypto.subtle.deriveKey(
-      { name:'PBKDF2', salt, iterations:600000, hash:'SHA-256' },
-      keySource, { name:'AES-GCM', length:256 }, false, ['decrypt']
-    );
-    let plaintext;
-    try {
-      plaintext = await crypto.subtle.decrypt(
-        { name:'AES-GCM', iv, additionalData:encoder.encode('KIN-WAKE-PAIRING-V2'), tagLength:128 },
-        key, ciphertext
-      );
-    } catch {
-      const e = new Error('Şifre yanlış');
-      e.badPassword = true;
-      throw e;
-    }
-    const payload = JSON.parse(new TextDecoder('utf-8', {fatal:true}).decode(plaintext));
-    if (payload.format !== 'kin-wake-v2' || !validWebhook(payload.webhook)) {
-      throw new Error('Eşleştirme içeriği geçersiz.');
-    }
-    return payload.webhook;
-  }
-  async function readPairing() {
-    const r = await fetch('./pairing.json?v=' + Date.now(), {
-      cache:'no-store', credentials:'omit', referrerPolicy:'no-referrer'
-    });
-    if (!r.ok) throw new Error('Eşleştirme bulunamadı; Windows KIN Wake Manager ile bir kez kaydet.');
-    const text = await r.text();
-    if (text.length > 4096) throw new Error('Şifreli eşleştirme dosyası beklenenden büyük.');
+  async function pairing(){
+    const r=await fetch('./pairing.json?v='+Date.now(),{cache:'no-store',credentials:'omit',referrerPolicy:'no-referrer'});
+    if(!r.ok)throw new Error('Eşleştirme bulunamadı.');
+    const text=await r.text();
+    if(text.length>4096)throw new Error('Eşleştirme dosyası geçersiz.');
     return JSON.parse(text);
   }
-  async function doUnlock() {
-    if (busy || activeWebhook || remaining()) return updateLockout();
-    const pass = password.value;
-    password.value = '';
-    if (!pass) return report('KIN Wake şifresini yaz.');
-    busy = true;
-    unlock.disabled = true;
-    report('Şifre doğrulanıyor…');
-    try {
-      const blob = await readPairing();
-      activeWebhook = await decryptPairing(blob, pass);
-      saveAttempts({ failures:0, until:0 });
-      lock.style.display = 'none';
-      wake.classList.add('visible');
-      lockAgain.classList.add('visible');
-      report('UNLOCKED · START ENGINE hazır.');
-    } catch (e) {
-      activeWebhook = null;
-      if (e.badPassword) addFailure();
-      else report('WAKE FAILED · ' + (e.message || 'Eşleştirme okunamadı.'));
-    } finally {
-      busy = false;
-      updateLockout();
+  async function decrypt(data,pass){
+    if(!data||data.version!==2||data.cipher!=='AES-256-GCM'||data.kdf!=='PBKDF2-SHA256'||data.iterations!==600000)throw new Error('Eşleştirme biçimi geçersiz.');
+    const salt=b64(data.salt),iv=b64(data.iv),cipher=b64(data.ciphertext);
+    const material=await crypto.subtle.importKey('raw',encoder.encode(pass),'PBKDF2',false,['deriveKey']);
+    const key=await crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:600000,hash:'SHA-256'},material,{name:'AES-GCM',length:256},false,['decrypt']);
+    let plain;
+    try{
+      plain=await crypto.subtle.decrypt({name:'AES-GCM',iv,additionalData:encoder.encode('KIN-WAKE-PAIRING-V2'),tagLength:128},key,cipher);
+    }catch{
+      const e=new Error('bad password');e.badPassword=true;throw e;
     }
+    const dataOut=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(plain));
+    if(dataOut.format!=='kin-wake-v2'||!validWebhook(dataOut.webhook))throw new Error('Eşleştirme içeriği geçersiz.');
+    return dataOut.webhook;
   }
-  function doLock() {
-    activeWebhook = null;
-    wake.classList.remove('visible');
-    lockAgain.classList.remove('visible');
-    lock.style.display = '';
-    report('LOCKED · Şifrenle giriş yap.');
-    updateLockout();
+  async function doUnlock(){
+    if(busy||activeWebhook||remaining())return refreshLock();
+    const pass=password.value;password.value='';
+    if(!pass)return report('KIN Wake giriş şifresini yaz.');
+    busy=true;unlock.disabled=true;report('Şifre doğrulanıyor…');
+    try{
+      activeWebhook=await decrypt(await pairing(),pass);
+      setState({fails:0,until:0});
+      lock.style.display='none';wake.classList.add('visible');lockAgain.classList.add('visible');
+      report('UNLOCKED · START ENGINE hazır.');
+    }catch(e){
+      activeWebhook='';
+      if(e.badPassword)fail();else report('WAKE FAILED · '+(e.message||'Eşleştirme okunamadı.'));
+    }finally{busy=false;refreshLock()}
   }
-  async function doWake() {
-    if (!activeWebhook || !validWebhook(activeWebhook)) return doLock();
-    wake.disabled = true;
-    report('MacroDroid tetikleyicisine istek gönderiliyor…');
-    try {
-      await fetch(activeWebhook, {
-        method:'GET', mode:'no-cors', cache:'no-store', credentials:'omit', referrerPolicy:'no-referrer'
-      });
-      report('WEBHOOK REQUEST SENT · İstek denendi; PC’nin açıldığı doğrulanmadı.');
-    } catch {
-      report('WAKE FAILED · MacroDroid ağını veya tetikleyici kaydını kontrol et.');
-    } finally { wake.disabled = false; }
+  function doLock(){
+    activeWebhook='';
+    wake.classList.remove('visible');lockAgain.classList.remove('visible');lock.style.display='';
+    report('LOCKED · Şifreni gir.');refreshLock();
   }
-  unlock.addEventListener('click', doUnlock);
-  password.addEventListener('keydown', e => { if (e.key === 'Enter') doUnlock(); });
-  wake.addEventListener('click', doWake);
-  lockAgain.addEventListener('click', doLock);
-  setInterval(updateLockout, 1000);
-  updateLockout();
+  async function doWake(){
+    if(!activeWebhook||!validWebhook(activeWebhook))return doLock();
+    wake.disabled=true;report('MacroDroid tetikleniyor…');
+    try{
+      await fetch(activeWebhook,{method:'GET',mode:'no-cors',cache:'no-store',credentials:'omit',referrerPolicy:'no-referrer'});
+      report('WAKE SENT · MacroDroid isteği gönderildi. PC açılışını kontrol et.');
+    }catch{report('WAKE FAILED · MacroDroid bağlantısını kontrol et.')}
+    finally{wake.disabled=false}
+  }
+  unlock.onclick=doUnlock;
+  password.addEventListener('keydown',e=>{if(e.key==='Enter')doUnlock()});
+  wake.onclick=doWake;
+  lockAgain.onclick=doLock;
+  setInterval(refreshLock,1000);
+  refreshLock();
 })();
 </script>
 </body>
